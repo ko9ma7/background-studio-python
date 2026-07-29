@@ -134,8 +134,8 @@ SAM 3는 “사람”, “노란 자동차”처럼 개념을 지정해 마스�
 - 사람·고객·저작물이 포함된 미디어는 처리 권한과 공개 동의를 확인하세요.
 - 결과 가장자리는 머리카락, 반투명 물체, 모션 블러, 복잡한 그림자에서
   흔들릴 수 있습니다. 중요한 작업은 프레임을 직접 검수하세요.
-- EXE 시작 직후 AI 모듈을 불러오는 동안 수 초가 걸릴 수 있습니다. 창의
-  `실행 중` 문구가 표시된 뒤 API 문서를 여세요.
+- EXE의 편집 화면은 먼저 열리고, 첫 처리 때 선택한 AI 모델을 내려받아
+  준비하므로 첫 변환은 이후 변환보다 오래 걸릴 수 있습니다.
 
 ## 개발
 
@@ -148,6 +148,7 @@ docker build -t background-studio-python:test .
 설계와 라이선스 판단은 [`docs/architecture.md`](docs/architecture.md),
 [`docs/research-matrix.md`](docs/research-matrix.md),
 [`docs/pro-editing-guide.md`](docs/pro-editing-guide.md),
+[`docs/user-guide.md`](docs/user-guide.md),
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)에 정리했습니다.
 
 ## License
