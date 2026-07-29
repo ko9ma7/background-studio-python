@@ -5,11 +5,12 @@
 
 ## 제공 기능
 
-- 이미지: PNG/JPEG/WebP/BMP/TIFF 입력, 투명 PNG, 단색/사진/블러 합성
+- 이미지: PNG/JPEG/WebP/BMP/TIFF 입력과 PNG/JPEG/WebP/BMP/TIFF/SVG 출력
 - 가장자리: rembg 알파 매팅·마스크 후처리 옵션
 - 그림자: 흐림, 불투명도, X/Y 오프셋
 - 모델 선택: U2Net, ISNet, BiRefNet 계열 rembg 세션
-- 동영상: 비동기 작업, 진행률, WebM 알파 또는 MP4 합성, 원본 오디오 유지
+- 전문 편집: 중앙 정렬·크기·X/Y 위치, 7종 필터, 마스크·외곽선 단독 레이어
+- 동영상: 길이 제한 없는 MP4/WebM/MOV/GIF, 진행률, 원본 오디오 유지
 - 고급 선택: SAM 3 텍스트 프롬프트 마스크 엔드포인트(별도 설치·라이선스)
 - 운영: Docker, 상태 확인, 업로드 제한, 만료 작업 정리, CI
 
@@ -38,10 +39,14 @@ docker compose up --build
 
 ```bash
 uv run background-studio image input.jpg output.png \
-  --mode color --color "#f5f5f5" --alpha-matting
+  --mode color --color "#f5f5f5" --alpha-matting \
+  --foreground-filter vivid --auto-center --subject-scale 0.9
 
 uv run background-studio image input.jpg output.png \
   --mode image --background studio.jpg
+
+uv run background-studio image input.jpg outline.svg \
+  --render-mode outline --auto-center --outline-width 4
 
 uv run background-studio video input.mp4 output.webm \
   --mode transparent --max-dimension 1280
@@ -50,9 +55,9 @@ uv run background-studio video input.mp4 output.mp4 \
   --mode blur --blur-radius 22
 ```
 
-동영상 CLI는 시스템 FFmpeg가 필요합니다. 투명 동영상은 WebM(VP9 alpha),
-배경을 합성한 결과는 MP4(H.264)를 사용합니다. 플레이어에 따라 알파 표시가
-다를 수 있으므로 편집기나 Chromium 계열 브라우저에서 확인하세요.
+동영상 CLI는 시스템 FFmpeg가 필요합니다. Docker에는 FFmpeg가 포함됩니다.
+투명 동영상은 WebM(VP9 alpha) 또는 MOV(ProRes 4444), 일반 결과는
+MP4/WebM/MOV/GIF를 사용할 수 있습니다.
 
 ## API
 
@@ -106,6 +111,7 @@ docker build -t background-studio-python:test .
 
 설계와 라이선스 판단은 [`docs/architecture.md`](docs/architecture.md),
 [`docs/research-matrix.md`](docs/research-matrix.md),
+[`docs/pro-editing-guide.md`](docs/pro-editing-guide.md),
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)에 정리했습니다.
 
 ## License

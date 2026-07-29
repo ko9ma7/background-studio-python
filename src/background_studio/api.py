@@ -8,9 +8,17 @@ from fastapi.responses import FileResponse, Response
 
 from . import __version__
 from .config import Settings
-from .editing import EditOptions, compose, open_rgba, to_png_bytes
+from .editing import (
+    EditOptions,
+    compose,
+    media_type_for,
+    open_rgba,
+    prepare_foreground,
+    to_image_bytes,
+    to_svg_outline,
+)
 from .engine import SUPPORTED_MODELS, RembgEngine
-from .models import BackgroundMode, JobStatus, JobStore
+from .models import BackgroundMode, ForegroundFilter, JobStatus, JobStore, RenderMode
 from .sam3_adapter import Sam3ImageAdapter, Sam3Unavailable
 from .security import read_limited, safe_video_suffix, validate_image
 from .video import VideoDependencyError, VideoOptions, VideoProcessor
@@ -36,6 +44,14 @@ def _edit_options(
     shadow_opacity: int,
     shadow_offset_x: int,
     shadow_offset_y: int,
+    foreground_filter: ForegroundFilter,
+    render_mode: RenderMode,
+    subject_scale: float,
+    subject_offset_x: float,
+    subject_offset_y: float,
+    auto_center: bool,
+    outline_width: int,
+    outline_color: str,
 ) -> EditOptions:
     options = EditOptions(
         mode=mode,
@@ -45,6 +61,14 @@ def _edit_options(
         shadow_opacity=shadow_opacity,
         shadow_offset_x=shadow_offset_x,
         shadow_offset_y=shadow_offset_y,
+        foreground_filter=foreground_filter,
+        render_mode=render_mode,
+        subject_scale=subject_scale,
+        subject_offset_x=subject_offset_x,
+        subject_offset_y=subject_offset_y,
+        auto_center=auto_center,
+        outline_width=outline_width,
+        outline_color=outline_color,
     )
     try:
         options.validate()
@@ -86,6 +110,16 @@ async def remove_image(
     shadow_opacity: int = Form(80),
     shadow_offset_x: int = Form(0),
     shadow_offset_y: int = Form(12),
+    foreground_filter: ForegroundFilter = Form(ForegroundFilter.ORIGINAL),
+    render_mode: RenderMode = Form(RenderMode.COMPOSITE),
+    subject_scale: float = Form(1.0),
+    subject_offset_x: float = Form(0.0),
+    subject_offset_y: float = Form(0.0),
+    auto_center: bool = Form(False),
+    outline_width: int = Form(3),
+    outline_color: str = Form("#111111"),
+    output_format: str = Form("png"),
+    quality: int = Form(92),
 ) -> Response:
     data = await read_limited(file, settings.max_image_bytes)
     validate_image(data)
@@ -98,6 +132,14 @@ async def remove_image(
         shadow_opacity,
         shadow_offset_x,
         shadow_offset_y,
+        foreground_filter,
+        render_mode,
+        subject_scale,
+        subject_offset_x,
+        subject_offset_y,
+        auto_center,
+        outline_width,
+        outline_color,
     )
     background_image = None
     if background is not None:
@@ -120,7 +162,25 @@ async def remove_image(
         result = compose(original, cutout, options, background_image)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return Response(to_png_bytes(result), media_type="image/png")
+    try:
+        normalized_format = output_format.lower()
+        if normalized_format == "svg":
+            if render_mode != RenderMode.OUTLINE:
+                raise ValueError("SVG output is available only in outline render mode")
+            svg = to_svg_outline(
+                prepare_foreground(cutout, options),
+                stroke_color=options.outline_color,
+                stroke_width=options.outline_width,
+            )
+            return Response(svg, media_type="image/svg+xml")
+        if not 1 <= quality <= 100:
+            raise ValueError("quality must be between 1 and 100")
+        return Response(
+            to_image_bytes(result, normalized_format, quality),
+            media_type=media_type_for(normalized_format),
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/v1/images/concept-mask")
@@ -148,7 +208,7 @@ def _run_video_job(
     job = jobs.get(job_id)
     if job is None:
         return
-    output_suffix = ".webm" if options.edit.mode == BackgroundMode.TRANSPARENT else ".mp4"
+    output_suffix = f".{options.output_format}"
     output = settings.work_dir / f"{job_id}{output_suffix}"
     jobs.update(job_id, status=JobStatus.PROCESSING, progress=1)
     try:
@@ -179,6 +239,15 @@ async def remove_video(
     blur_radius: float = Form(18.0),
     max_dimension: int = Form(1280),
     fps: float | None = Form(None),
+    output_format: str = Form("webm"),
+    foreground_filter: ForegroundFilter = Form(ForegroundFilter.ORIGINAL),
+    render_mode: RenderMode = Form(RenderMode.COMPOSITE),
+    subject_scale: float = Form(1.0),
+    subject_offset_x: float = Form(0.0),
+    subject_offset_y: float = Form(0.0),
+    auto_center: bool = Form(False),
+    outline_width: int = Form(3),
+    outline_color: str = Form("#111111"),
 ) -> dict[str, object]:
     video_processor.ensure_dependencies()
     suffix = safe_video_suffix(file.filename)
@@ -197,9 +266,26 @@ async def remove_video(
         raise HTTPException(status_code=422, detail="background file is required for image mode")
     options = VideoOptions(
         model=model,
-        edit=_edit_options(mode, color, blur_radius, 0, 0, 0, 0),
+        edit=_edit_options(
+            mode,
+            color,
+            blur_radius,
+            0,
+            0,
+            0,
+            0,
+            foreground_filter,
+            render_mode,
+            subject_scale,
+            subject_offset_x,
+            subject_offset_y,
+            auto_center,
+            outline_width,
+            outline_color,
+        ),
         max_dimension=max_dimension,
         fps=fps,
+        output_format=output_format.lower(),
     )
     try:
         options.validate()
@@ -227,7 +313,12 @@ def download_job(job_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.COMPLETE or not job.output_path or not job.output_path.exists():
         raise HTTPException(status_code=409, detail="Job output is not ready")
-    media_type = "video/webm" if job.output_path.suffix == ".webm" else "video/mp4"
+    media_type = {
+        ".webm": "video/webm",
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".gif": "image/gif",
+    }.get(job.output_path.suffix, "application/octet-stream")
     return FileResponse(
         job.output_path,
         media_type=media_type,

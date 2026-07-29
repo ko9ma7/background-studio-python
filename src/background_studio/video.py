@@ -13,7 +13,7 @@ from PIL import Image
 
 from .editing import EditOptions, compose
 from .engine import RembgEngine
-from .models import BackgroundMode
+from .models import BackgroundMode, RenderMode
 
 
 class VideoDependencyError(RuntimeError):
@@ -26,6 +26,7 @@ class VideoOptions:
     edit: EditOptions = EditOptions()
     max_dimension: int = 1280
     fps: float | None = None
+    output_format: str = "auto"
 
     def validate(self) -> None:
         self.edit.validate()
@@ -33,6 +34,8 @@ class VideoOptions:
             raise ValueError("max_dimension must be between 320 and 3840")
         if self.fps is not None and not 1 <= self.fps <= 60:
             raise ValueError("fps must be between 1 and 60")
+        if self.output_format not in {"auto", "mp4", "webm", "mov", "gif"}:
+            raise ValueError("output_format must be auto, mp4, webm, mov, or gif")
 
 
 class VideoProcessor:
@@ -84,6 +87,19 @@ class VideoProcessor:
         self.ensure_dependencies()
         source_fps, reported_frames = self._probe(source)
         fps = options.fps or source_fps
+        output_format = (
+            output.suffix.lower().lstrip(".")
+            if options.output_format == "auto"
+            else options.output_format
+        )
+        if output_format not in {"mp4", "webm", "mov", "gif"}:
+            raise ValueError("video output extension must be mp4, webm, mov, or gif")
+        transparent = (
+            options.edit.mode == BackgroundMode.TRANSPARENT
+            and options.edit.render_mode != RenderMode.MASK
+        ) or options.edit.render_mode == RenderMode.OUTLINE
+        if transparent and output_format not in {"webm", "mov"}:
+            raise ValueError("transparent video requires WebM or MOV output")
 
         with TemporaryDirectory(prefix="background-studio-") as temp_name:
             temp = Path(temp_name)
@@ -122,12 +138,12 @@ class VideoProcessor:
                     on_progress(min(95, round(index / total * 95)))
 
             output.parent.mkdir(parents=True, exist_ok=True)
-            if options.edit.mode == BackgroundMode.TRANSPARENT:
+            if output_format == "webm":
                 encode = [
                     "-c:v",
                     "libvpx-vp9",
                     "-pix_fmt",
-                    "yuva420p",
+                    "yuva420p" if transparent else "yuv420p",
                     "-auto-alt-ref",
                     "0",
                     "-b:v",
@@ -135,8 +151,28 @@ class VideoProcessor:
                     "-crf",
                     "24",
                 ]
+                audio = ["-c:a", "libopus"]
+            elif output_format == "mov" and transparent:
+                encode = [
+                    "-c:v",
+                    "prores_ks",
+                    "-profile:v",
+                    "4444",
+                    "-pix_fmt",
+                    "yuva444p10le",
+                ]
+                audio = ["-c:a", "pcm_s16le"]
+            elif output_format == "gif":
+                encode = [
+                    "-vf",
+                    "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                    "-loop",
+                    "0",
+                ]
+                audio = ["-an"]
             else:
                 encode = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20"]
+                audio = ["-c:a", "aac"]
             subprocess.run(
                 [
                     self.ffmpeg,
@@ -154,8 +190,7 @@ class VideoProcessor:
                     "-map",
                     "1:a?",
                     *encode,
-                    "-c:a",
-                    "aac" if output.suffix == ".mp4" else "libopus",
+                    *audio,
                     "-shortest",
                     "-y",
                     str(output),

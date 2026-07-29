@@ -15,6 +15,22 @@ class BackgroundMode(StrEnum):
     BLUR = "blur"
 
 
+class ForegroundFilter(StrEnum):
+    ORIGINAL = "original"
+    BRIGHT = "bright"
+    VIVID = "vivid"
+    WARM = "warm"
+    COOL = "cool"
+    GRAYSCALE = "grayscale"
+    COMIC = "comic"
+
+
+class RenderMode(StrEnum):
+    COMPOSITE = "composite"
+    MASK = "mask"
+    OUTLINE = "outline"
+
+
 class JobStatus(StrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"

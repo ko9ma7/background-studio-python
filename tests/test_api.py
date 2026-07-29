@@ -45,3 +45,24 @@ def test_image_mode_requires_background(monkeypatch) -> None:
         data={"mode": "image"},
     )
     assert response.status_code == 422
+
+
+def test_image_endpoint_can_return_webp_and_outline_svg(monkeypatch) -> None:
+    monkeypatch.setattr(api, "engine", FakeEngine())
+    client = TestClient(api.app)
+    webp = client.post(
+        "/v1/images/remove",
+        files={"file": ("test.png", png_bytes(), "image/png")},
+        data={"output_format": "webp"},
+    )
+    svg = client.post(
+        "/v1/images/remove",
+        files={"file": ("test.png", png_bytes(), "image/png")},
+        data={"output_format": "svg", "render_mode": "outline"},
+    )
+
+    assert webp.status_code == 200
+    assert webp.headers["content-type"] == "image/webp"
+    assert svg.status_code == 200
+    assert svg.headers["content-type"] == "image/svg+xml"
+    assert svg.text.startswith("<svg")
