@@ -4,7 +4,6 @@ import io
 from threading import Lock
 
 from PIL import Image
-from rembg import new_session, remove
 
 SUPPORTED_MODELS = (
     "u2net",
@@ -28,6 +27,8 @@ class RembgEngine:
             raise ValueError(f"Unsupported model: {model}")
         with self._locks_guard:
             if model not in self._sessions:
+                from rembg import new_session
+
                 self._sessions[model] = new_session(model)
             return self._sessions[model]
 
@@ -46,6 +47,8 @@ class RembgEngine:
         erode_size: int = 10,
         post_process_mask: bool = False,
     ) -> Image.Image:
+        from rembg import remove
+
         if not 0 <= foreground_threshold <= 255:
             raise ValueError("foreground_threshold must be between 0 and 255")
         if not 0 <= background_threshold <= 255:

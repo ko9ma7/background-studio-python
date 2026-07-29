@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import multiprocessing
 import os
 import socket
 import threading
@@ -137,14 +136,9 @@ class Launcher:
 
 
 def main() -> None:
-    multiprocessing.freeze_support()
-    try:
-        Launcher().start()
-    except Exception as exc:
-        root = Tk()
-        root.withdraw()
-        messagebox.showerror("Background Studio Python", str(exc))
-        root.destroy()
+    from background_studio.desktop_app import main as run_desktop
+
+    run_desktop()
 
 
 if __name__ == "__main__":

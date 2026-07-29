@@ -1,8 +1,9 @@
-# Background Studio · Python 1.2
+# Background Studio · Python 1.3
 
 이미지와 동영상의 배경 제거, 외곽·마스크 추출, 색 보정, 위치·캔버스 편집을
-로컬에서 실행하는 FastAPI + CLI 프로젝트입니다. Windows용 실행 파일도
-제공하므로 Python을 설치하지 않고 로컬 API를 열 수 있습니다.
+로컬에서 실행하는 데스크톱 편집기 + FastAPI + CLI 프로젝트입니다.
+Windows 실행 파일은 Python을 설치하지 않아도 C#판과 같은 시각적 편집
+화면을 바로 엽니다.
 
 ## 제공 기능
 
@@ -17,6 +18,8 @@
 - 동영상: 길이 제한 없는 MP4/WebM/MOV/GIF, 진행률, 원본 오디오 유지
 - 고급 선택: SAM 3 텍스트 프롬프트 마스크 엔드포인트(별도 설치·라이선스)
 - 운영: Docker, 상태 확인, 업로드 제한, 만료 작업 정리, CI
+- Windows GUI: 파일 대기열, 큰 미리보기, 5개 편집 탭, 자동 저장, 결과·폴더 열기
+- FFmpeg: 영상 처리 시 8.1.2 자동 다운로드와 SHA-256 검증
 
 모든 기본 처리는 내 PC/서버에서 실행됩니다. 외부 AI API로 파일을 보내지
 않습니다.
@@ -42,14 +45,19 @@ docker compose up --build
 ## Windows EXE
 
 [GitHub Releases](https://github.com/ko9ma7/background-studio-python/releases)에서
-`BackgroundStudio-Python-v1.2.0-win-x64.zip`을 내려받아 압축을 풀고
+`BackgroundStudio-Python-v1.3.0-win-x64.zip`을 내려받아 압축을 풀고
 `BackgroundStudio-Python.exe`를 실행합니다.
 
-- 실행 창이 로컬 API를 준비한 뒤 `http://127.0.0.1:8765/docs`를 엽니다.
+- 실행 즉시 파일 대기열·미리보기·배경·필터·위치·고급·저장 탭이 있는
+  데스크톱 편집기가 열립니다.
 - 첫 처리 때 선택한 rembg 모델을 사용자 캐시에 내려받습니다.
-- 종료 버튼이나 창 닫기를 누르면 API 서버와 사용 포트도 함께 닫힙니다.
-- 동영상은 FFmpeg가 별도로 필요합니다. 이미지 처리와 편집은 EXE만으로
-  실행됩니다.
+- 결과는 기본적으로 `사진\Background Studio Python`에 자동 저장되며
+  앱에서 저장 폴더와 결과 파일을 바로 열 수 있습니다.
+- 동영상 처리에 필요한 FFmpeg는 앱이 자체 폴더에 자동 준비하므로 PATH나
+  별도 설치가 필요하지 않습니다.
+
+API 서버가 필요한 경우에는 소스 또는 Docker에서 기존 FastAPI 명령을
+그대로 사용할 수 있습니다. EXE의 기본 화면만 시각적 편집기로 변경했습니다.
 
 릴리스 ZIP 옆의 `.sha256` 파일로 다운로드 무결성을 확인할 수 있습니다.
 소스에서 직접 만들려면 Windows PowerShell에서 다음을 실행합니다.
