@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "background-studio"
+version = "1.0.0"
+description = "Local-first image and video background removal API and CLI"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+authors = [{ name = "ko9ma7" }]
+dependencies = [
+  "fastapi==0.140.13",
+  "numba>=0.61.2,<1",
+  "pillow>=11.3,<13",
+  "python-multipart>=0.0.20,<1",
+  "rembg[cpu]==2.0.77",
+  "typer>=0.16,<1",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<10",
+  "pytest-cov>=6.2,<8",
+  "ruff>=0.12,<1",
+]
+sam3 = [
+  "torch>=2.7",
+  "torchvision>=0.22",
+]
+
+[project.scripts]
+background-studio = "background_studio.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/background_studio"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/background_studio/api.py" = ["B008"]
+"src/background_studio/cli.py" = ["B008"]
+"src/background_studio/video.py" = ["S603"]

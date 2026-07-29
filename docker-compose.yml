@@ -1,0 +1,20 @@
+services:
+  background-studio:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - background-studio-data:/data
+    environment:
+      BACKGROUND_STUDIO_MAX_IMAGE_MB: "25"
+      BACKGROUND_STUDIO_MAX_VIDEO_MB: "500"
+      BACKGROUND_STUDIO_JOB_TTL_HOURS: "24"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  background-studio-data:
+
