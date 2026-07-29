@@ -7,7 +7,7 @@ from background_studio.editing import (
     to_image_bytes,
     to_svg_outline,
 )
-from background_studio.models import BackgroundMode, ForegroundFilter, RenderMode
+from background_studio.models import BackgroundMode, CanvasAspect, ForegroundFilter, RenderMode
 
 
 def test_color_composite_keeps_foreground_and_replaces_background() -> None:
@@ -68,3 +68,32 @@ def test_image_export_formats_and_svg_outline() -> None:
     svg = to_svg_outline(image)
     assert svg.startswith("<svg")
     assert "<path" in svg
+
+
+def test_advanced_color_mask_transform_and_canvas_controls() -> None:
+    source = Image.new("RGBA", (20, 10), (0, 0, 0, 0))
+    for x in range(3, 9):
+        for y in range(2, 8):
+            source.putpixel((x, y), (120, 80, 40, 180))
+    options = EditOptions(
+        foreground_filter=ForegroundFilter.POSTERIZE,
+        brightness=1.2,
+        contrast=1.3,
+        saturation=0.7,
+        temperature=0.25,
+        hue=30,
+        foreground_opacity=0.8,
+        rotation=25,
+        flip_horizontal=True,
+        mask_threshold=0.2,
+        mask_feather=0.1,
+        mask_expansion=-1,
+        auto_center=True,
+        canvas_aspect=CanvasAspect.SQUARE,
+    )
+
+    result = compose(source, source, options)
+
+    assert result.size == (10, 10)
+    assert result.getchannel("A").getbbox() is not None
+    assert max(result.getchannel("A").getextrema()) < 255

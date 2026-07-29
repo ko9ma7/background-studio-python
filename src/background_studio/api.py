@@ -18,7 +18,14 @@ from .editing import (
     to_svg_outline,
 )
 from .engine import SUPPORTED_MODELS, RembgEngine
-from .models import BackgroundMode, ForegroundFilter, JobStatus, JobStore, RenderMode
+from .models import (
+    BackgroundMode,
+    CanvasAspect,
+    ForegroundFilter,
+    JobStatus,
+    JobStore,
+    RenderMode,
+)
 from .sam3_adapter import Sam3ImageAdapter, Sam3Unavailable
 from .security import read_limited, safe_video_suffix, validate_image
 from .video import VideoDependencyError, VideoOptions, VideoProcessor
@@ -52,6 +59,19 @@ def _edit_options(
     auto_center: bool,
     outline_width: int,
     outline_color: str,
+    brightness: float = 1.0,
+    contrast: float = 1.0,
+    saturation: float = 1.0,
+    temperature: float = 0.0,
+    hue: float = 0.0,
+    foreground_opacity: float = 1.0,
+    rotation: float = 0.0,
+    flip_horizontal: bool = False,
+    flip_vertical: bool = False,
+    mask_threshold: float = 0.0,
+    mask_feather: float = 0.0,
+    mask_expansion: int = 0,
+    canvas_aspect: CanvasAspect = CanvasAspect.ORIGINAL,
 ) -> EditOptions:
     options = EditOptions(
         mode=mode,
@@ -69,6 +89,19 @@ def _edit_options(
         auto_center=auto_center,
         outline_width=outline_width,
         outline_color=outline_color,
+        brightness=brightness,
+        contrast=contrast,
+        saturation=saturation,
+        temperature=temperature,
+        hue=hue,
+        foreground_opacity=foreground_opacity,
+        rotation=rotation,
+        flip_horizontal=flip_horizontal,
+        flip_vertical=flip_vertical,
+        mask_threshold=mask_threshold,
+        mask_feather=mask_feather,
+        mask_expansion=mask_expansion,
+        canvas_aspect=canvas_aspect,
     )
     try:
         options.validate()
@@ -118,6 +151,19 @@ async def remove_image(
     auto_center: bool = Form(False),
     outline_width: int = Form(3),
     outline_color: str = Form("#111111"),
+    brightness: float = Form(1.0),
+    contrast: float = Form(1.0),
+    saturation: float = Form(1.0),
+    temperature: float = Form(0.0),
+    hue: float = Form(0.0),
+    foreground_opacity: float = Form(1.0),
+    rotation: float = Form(0.0),
+    flip_horizontal: bool = Form(False),
+    flip_vertical: bool = Form(False),
+    mask_threshold: float = Form(0.0),
+    mask_feather: float = Form(0.0),
+    mask_expansion: int = Form(0),
+    canvas_aspect: CanvasAspect = Form(CanvasAspect.ORIGINAL),
     output_format: str = Form("png"),
     quality: int = Form(92),
 ) -> Response:
@@ -140,6 +186,19 @@ async def remove_image(
         auto_center,
         outline_width,
         outline_color,
+        brightness,
+        contrast,
+        saturation,
+        temperature,
+        hue,
+        foreground_opacity,
+        rotation,
+        flip_horizontal,
+        flip_vertical,
+        mask_threshold,
+        mask_feather,
+        mask_expansion,
+        canvas_aspect,
     )
     background_image = None
     if background is not None:
@@ -248,6 +307,19 @@ async def remove_video(
     auto_center: bool = Form(False),
     outline_width: int = Form(3),
     outline_color: str = Form("#111111"),
+    brightness: float = Form(1.0),
+    contrast: float = Form(1.0),
+    saturation: float = Form(1.0),
+    temperature: float = Form(0.0),
+    hue: float = Form(0.0),
+    foreground_opacity: float = Form(1.0),
+    rotation: float = Form(0.0),
+    flip_horizontal: bool = Form(False),
+    flip_vertical: bool = Form(False),
+    mask_threshold: float = Form(0.0),
+    mask_feather: float = Form(0.0),
+    mask_expansion: int = Form(0),
+    canvas_aspect: CanvasAspect = Form(CanvasAspect.ORIGINAL),
 ) -> dict[str, object]:
     video_processor.ensure_dependencies()
     suffix = safe_video_suffix(file.filename)
@@ -282,6 +354,19 @@ async def remove_video(
             auto_center,
             outline_width,
             outline_color,
+            brightness,
+            contrast,
+            saturation,
+            temperature,
+            hue,
+            foreground_opacity,
+            rotation,
+            flip_horizontal,
+            flip_vertical,
+            mask_threshold,
+            mask_feather,
+            mask_expansion,
+            canvas_aspect,
         ),
         max_dimension=max_dimension,
         fps=fps,

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageChops, ImageColor, ImageEnhance, ImageFilter, ImageOps
 
-from .models import BackgroundMode, ForegroundFilter, RenderMode
+from .models import BackgroundMode, CanvasAspect, ForegroundFilter, RenderMode
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,19 @@ class EditOptions:
     auto_center: bool = False
     outline_width: int = 3
     outline_color: str = "#111111"
+    brightness: float = 1.0
+    contrast: float = 1.0
+    saturation: float = 1.0
+    temperature: float = 0.0
+    hue: float = 0.0
+    foreground_opacity: float = 1.0
+    rotation: float = 0.0
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+    mask_threshold: float = 0.0
+    mask_feather: float = 0.0
+    mask_expansion: int = 0
+    canvas_aspect: CanvasAspect = CanvasAspect.ORIGINAL
 
     def validate(self) -> None:
         try:
@@ -43,6 +56,23 @@ class EditOptions:
             raise ValueError("subject offsets must be between -1 and 1")
         if not 1 <= self.outline_width <= 50:
             raise ValueError("outline_width must be between 1 and 50")
+        for name, value in (
+            ("brightness", self.brightness),
+            ("contrast", self.contrast),
+            ("saturation", self.saturation),
+        ):
+            if not 0 <= value <= 3:
+                raise ValueError(f"{name} must be between 0 and 3")
+        if not -1 <= self.temperature <= 1:
+            raise ValueError("temperature must be between -1 and 1")
+        if not -180 <= self.hue <= 180 or not -180 <= self.rotation <= 180:
+            raise ValueError("hue and rotation must be between -180 and 180")
+        if not 0 <= self.foreground_opacity <= 1:
+            raise ValueError("foreground_opacity must be between 0 and 1")
+        if not 0 <= self.mask_threshold <= 1 or not 0 <= self.mask_feather <= 0.5:
+            raise ValueError("mask threshold and feather are outside their allowed range")
+        if not -12 <= self.mask_expansion <= 12:
+            raise ValueError("mask_expansion must be between -12 and 12")
         try:
             ImageColor.getrgb(self.outline_color)
         except ValueError as exc:
@@ -117,11 +147,68 @@ def _apply_filter(cutout: Image.Image, preset: ForegroundFilter) -> Image.Image:
             ImageOps.grayscale(smooth).filter(ImageFilter.FIND_EDGES)
         ).point(lambda value: 255 if value > 150 else 35)
         rgb = ImageChops.multiply(colors, Image.merge("RGB", (edges, edges, edges)))
+    elif preset == ForegroundFilter.HIGH_CONTRAST:
+        rgb = ImageEnhance.Contrast(rgb).enhance(1.55)
+    elif preset == ForegroundFilter.POSTERIZE:
+        rgb = ImageOps.posterize(rgb, 3)
+    elif preset == ForegroundFilter.SEPIA:
+        grayscale = ImageOps.grayscale(rgb)
+        rgb = ImageOps.colorize(grayscale, "#3a2415", "#f2d6a2")
+    elif preset == ForegroundFilter.INVERT:
+        rgb = ImageOps.invert(rgb)
+    elif preset == ForegroundFilter.PENCIL:
+        edges = ImageOps.grayscale(rgb).filter(ImageFilter.FIND_EDGES)
+        rgb = ImageOps.invert(edges).point(lambda value: 255 if value > 205 else 25).convert("RGB")
+    return Image.merge("RGBA", (*rgb.split(), alpha))
+
+
+def _adjust_foreground(source: Image.Image, options: EditOptions) -> Image.Image:
+    alpha = source.getchannel("A")
+    rgb = source.convert("RGB")
+    rgb = ImageEnhance.Brightness(rgb).enhance(options.brightness)
+    rgb = ImageEnhance.Contrast(rgb).enhance(options.contrast)
+    rgb = ImageEnhance.Color(rgb).enhance(options.saturation)
+    if options.temperature:
+        red, green, blue = rgb.split()
+        offset = round(options.temperature * 30)
+        red = red.point(lambda value: max(0, min(255, value + offset)))
+        blue = blue.point(lambda value: max(0, min(255, value - offset)))
+        rgb = Image.merge("RGB", (red, green, blue))
+    if options.hue:
+        hsv = rgb.convert("HSV")
+        hue, saturation, value = hsv.split()
+        shift = round(options.hue / 360 * 255)
+        hue = hue.point(lambda channel: (channel + shift) % 256)
+        rgb = Image.merge("HSV", (hue, saturation, value)).convert("RGB")
+    if options.mask_threshold or options.mask_feather:
+        threshold = options.mask_threshold * 255
+        feather = options.mask_feather * 255
+        if feather:
+            alpha = alpha.point(
+                lambda value: max(
+                    0,
+                    min(255, round((value - threshold + feather) / (2 * feather) * 255)),
+                )
+            )
+        else:
+            alpha = alpha.point(lambda value: 255 if value >= threshold else 0)
+    if options.mask_expansion:
+        kernel = abs(options.mask_expansion) * 2 + 1
+        alpha = alpha.filter(
+            ImageFilter.MaxFilter(kernel)
+            if options.mask_expansion > 0
+            else ImageFilter.MinFilter(kernel)
+        )
+    if options.foreground_opacity != 1:
+        alpha = alpha.point(lambda value: round(value * options.foreground_opacity))
     return Image.merge("RGBA", (*rgb.split(), alpha))
 
 
 def prepare_foreground(cutout: Image.Image, options: EditOptions) -> Image.Image:
-    source = _apply_filter(cutout.convert("RGBA"), options.foreground_filter)
+    source = _adjust_foreground(
+        _apply_filter(cutout.convert("RGBA"), options.foreground_filter),
+        options,
+    )
     alpha_box = source.getchannel("A").getbbox()
     if alpha_box is None:
         return Image.new("RGBA", source.size, (0, 0, 0, 0))
@@ -130,6 +217,17 @@ def prepare_foreground(cutout: Image.Image, options: EditOptions) -> Image.Image
     height = max(1, round(crop.height * options.subject_scale))
     if (width, height) != crop.size:
         crop = crop.resize((width, height), Image.Resampling.LANCZOS)
+    if options.flip_horizontal:
+        crop = ImageOps.mirror(crop)
+    if options.flip_vertical:
+        crop = ImageOps.flip(crop)
+    if options.rotation:
+        crop = crop.rotate(
+            -options.rotation,
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+        )
+        width, height = crop.size
     if options.auto_center:
         center_x = source.width / 2
         center_y = source.height / 2
@@ -141,6 +239,26 @@ def prepare_foreground(cutout: Image.Image, options: EditOptions) -> Image.Image
     positioned = Image.new("RGBA", source.size, (0, 0, 0, 0))
     positioned.alpha_composite(crop, (round(center_x - width / 2), round(center_y - height / 2)))
     return positioned
+
+
+def _canvas_size(size: tuple[int, int], aspect: CanvasAspect) -> tuple[int, int]:
+    width, height = size
+    if aspect == CanvasAspect.ORIGINAL:
+        return size
+    ratio = {
+        CanvasAspect.SQUARE: 1.0,
+        CanvasAspect.PORTRAIT_45: 4 / 5,
+        CanvasAspect.LANDSCAPE_169: 16 / 9,
+    }[aspect]
+    if width / height > ratio:
+        return max(1, round(height * ratio)), height
+    return width, max(1, round(width / ratio))
+
+
+def _center_crop(source: Image.Image, size: tuple[int, int]) -> Image.Image:
+    left = (source.width - size[0]) // 2
+    top = (source.height - size[1]) // 2
+    return source.crop((left, top, left + size[0], top + size[1]))
 
 
 def _mask_layer(cutout: Image.Image) -> Image.Image:
@@ -168,8 +286,8 @@ def compose(
     background: Image.Image | None = None,
 ) -> Image.Image:
     options.validate()
-    size = cutout.size
-    foreground = prepare_foreground(cutout, options)
+    size = _canvas_size(cutout.size, options.canvas_aspect)
+    foreground = _center_crop(prepare_foreground(cutout, options), size)
     if options.render_mode == RenderMode.MASK:
         return _mask_layer(foreground)
     if options.render_mode == RenderMode.OUTLINE:

@@ -8,7 +8,7 @@ from PIL import Image
 from .config import Settings
 from .editing import EditOptions, compose, prepare_foreground, to_image_bytes, to_svg_outline
 from .engine import SUPPORTED_MODELS, RembgEngine
-from .models import BackgroundMode, ForegroundFilter, RenderMode
+from .models import BackgroundMode, CanvasAspect, ForegroundFilter, RenderMode
 from .video import VideoOptions, VideoProcessor
 
 app = typer.Typer(no_args_is_help=True, help="Local image and video background studio")
@@ -40,6 +40,19 @@ def image(
     auto_center: bool = typer.Option(False),
     outline_width: int = typer.Option(3, min=1, max=50),
     outline_color: str = typer.Option("#111111"),
+    brightness: float = typer.Option(1.0, min=0, max=3),
+    contrast: float = typer.Option(1.0, min=0, max=3),
+    saturation: float = typer.Option(1.0, min=0, max=3),
+    temperature: float = typer.Option(0.0, min=-1, max=1),
+    hue: float = typer.Option(0.0, min=-180, max=180),
+    foreground_opacity: float = typer.Option(1.0, min=0, max=1),
+    rotation: float = typer.Option(0.0, min=-180, max=180),
+    flip_horizontal: bool = typer.Option(False),
+    flip_vertical: bool = typer.Option(False),
+    mask_threshold: float = typer.Option(0.0, min=0, max=1),
+    mask_feather: float = typer.Option(0.0, min=0, max=0.5),
+    mask_expansion: int = typer.Option(0, min=-12, max=12),
+    canvas_aspect: CanvasAspect = typer.Option(CanvasAspect.ORIGINAL),
 ) -> None:
     selected_mode = _mode(mode)
     if selected_mode == BackgroundMode.IMAGE and background is None:
@@ -60,6 +73,19 @@ def image(
         auto_center=auto_center,
         outline_width=outline_width,
         outline_color=outline_color,
+        brightness=brightness,
+        contrast=contrast,
+        saturation=saturation,
+        temperature=temperature,
+        hue=hue,
+        foreground_opacity=foreground_opacity,
+        rotation=rotation,
+        flip_horizontal=flip_horizontal,
+        flip_vertical=flip_vertical,
+        mask_threshold=mask_threshold,
+        mask_feather=mask_feather,
+        mask_expansion=mask_expansion,
+        canvas_aspect=canvas_aspect,
     )
     result = compose(
         original,
@@ -102,6 +128,19 @@ def video(
     auto_center: bool = typer.Option(False),
     outline_width: int = typer.Option(3, min=1, max=50),
     outline_color: str = typer.Option("#111111"),
+    brightness: float = typer.Option(1.0, min=0, max=3),
+    contrast: float = typer.Option(1.0, min=0, max=3),
+    saturation: float = typer.Option(1.0, min=0, max=3),
+    temperature: float = typer.Option(0.0, min=-1, max=1),
+    hue: float = typer.Option(0.0, min=-180, max=180),
+    foreground_opacity: float = typer.Option(1.0, min=0, max=1),
+    rotation: float = typer.Option(0.0, min=-180, max=180),
+    flip_horizontal: bool = typer.Option(False),
+    flip_vertical: bool = typer.Option(False),
+    mask_threshold: float = typer.Option(0.0, min=0, max=1),
+    mask_feather: float = typer.Option(0.0, min=0, max=0.5),
+    mask_expansion: int = typer.Option(0, min=-12, max=12),
+    canvas_aspect: CanvasAspect = typer.Option(CanvasAspect.ORIGINAL),
 ) -> None:
     settings = Settings.from_env()
     selected_mode = _mode(mode)
@@ -128,6 +167,19 @@ def video(
                 auto_center=auto_center,
                 outline_width=outline_width,
                 outline_color=outline_color,
+                brightness=brightness,
+                contrast=contrast,
+                saturation=saturation,
+                temperature=temperature,
+                hue=hue,
+                foreground_opacity=foreground_opacity,
+                rotation=rotation,
+                flip_horizontal=flip_horizontal,
+                flip_vertical=flip_vertical,
+                mask_threshold=mask_threshold,
+                mask_feather=mask_feather,
+                mask_expansion=mask_expansion,
+                canvas_aspect=canvas_aspect,
             ),
             max_dimension=max_dimension,
             fps=fps,

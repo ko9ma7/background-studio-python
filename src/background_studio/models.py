@@ -23,12 +23,24 @@ class ForegroundFilter(StrEnum):
     COOL = "cool"
     GRAYSCALE = "grayscale"
     COMIC = "comic"
+    HIGH_CONTRAST = "high_contrast"
+    POSTERIZE = "posterize"
+    SEPIA = "sepia"
+    INVERT = "invert"
+    PENCIL = "pencil"
 
 
 class RenderMode(StrEnum):
     COMPOSITE = "composite"
     MASK = "mask"
     OUTLINE = "outline"
+
+
+class CanvasAspect(StrEnum):
+    ORIGINAL = "original"
+    SQUARE = "square"
+    PORTRAIT_45 = "portrait_45"
+    LANDSCAPE_169 = "landscape_169"
 
 
 class JobStatus(StrEnum):

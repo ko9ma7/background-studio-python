@@ -1,7 +1,8 @@
-# Background Studio · Python
+# Background Studio · Python 1.2
 
-이미지와 동영상의 배경을 로컬에서 제거하고, 투명·단색·다른 이미지·블러
-배경으로 합성하는 FastAPI + CLI 프로젝트입니다.
+이미지와 동영상의 배경 제거, 외곽·마스크 추출, 색 보정, 위치·캔버스 편집을
+로컬에서 실행하는 FastAPI + CLI 프로젝트입니다. Windows용 실행 파일도
+제공하므로 Python을 설치하지 않고 로컬 API를 열 수 있습니다.
 
 ## 제공 기능
 
@@ -9,7 +10,10 @@
 - 가장자리: rembg 알파 매팅·마스크 후처리 옵션
 - 그림자: 흐림, 불투명도, X/Y 오프셋
 - 모델 선택: U2Net, ISNet, BiRefNet 계열 rembg 세션
-- 전문 편집: 중앙 정렬·크기·X/Y 위치, 7종 필터, 마스크·외곽선 단독 레이어
+- 전문 편집: 중앙 정렬·크기·X/Y 위치, 회전·반전, 캔버스 비율
+- 색 보정: 밝기·대비·채도·색온도·색조·피사체 불투명도
+- 마스크 보정: 임계값·페더·확장/축소, 마스크·외곽선 단독 레이어
+- 필터: 밝게·선명하게·웜·쿨·흑백·코믹·고대비·포스터·세피아·반전·연필선
 - 동영상: 길이 제한 없는 MP4/WebM/MOV/GIF, 진행률, 원본 오디오 유지
 - 고급 선택: SAM 3 텍스트 프롬프트 마스크 엔드포인트(별도 설치·라이선스)
 - 운영: Docker, 상태 확인, 업로드 제한, 만료 작업 정리, CI
@@ -35,12 +39,34 @@ Docker에는 FFmpeg가 포함됩니다.
 docker compose up --build
 ```
 
+## Windows EXE
+
+[GitHub Releases](https://github.com/ko9ma7/background-studio-python/releases)에서
+`BackgroundStudio-Python-v1.2.0-win-x64.zip`을 내려받아 압축을 풀고
+`BackgroundStudio-Python.exe`를 실행합니다.
+
+- 실행 창이 로컬 API를 준비한 뒤 `http://127.0.0.1:8765/docs`를 엽니다.
+- 첫 처리 때 선택한 rembg 모델을 사용자 캐시에 내려받습니다.
+- 종료 버튼이나 창 닫기를 누르면 API 서버와 사용 포트도 함께 닫힙니다.
+- 동영상은 FFmpeg가 별도로 필요합니다. 이미지 처리와 편집은 EXE만으로
+  실행됩니다.
+
+릴리스 ZIP 옆의 `.sha256` 파일로 다운로드 무결성을 확인할 수 있습니다.
+소스에서 직접 만들려면 Windows PowerShell에서 다음을 실행합니다.
+
+```powershell
+uv sync --extra dev
+.\scripts\build-windows.ps1
+```
+
 ## CLI
 
 ```bash
 uv run background-studio image input.jpg output.png \
   --mode color --color "#f5f5f5" --alpha-matting \
-  --foreground-filter vivid --auto-center --subject-scale 0.9
+  --foreground-filter comic --auto-center --subject-scale 0.9 \
+  --brightness 1.1 --contrast 1.15 --saturation 1.2 \
+  --mask-feather 0.12 --canvas-aspect square
 
 uv run background-studio image input.jpg output.png \
   --mode image --background studio.jpg
@@ -100,6 +126,8 @@ SAM 3는 “사람”, “노란 자동차”처럼 개념을 지정해 마스�
 - 사람·고객·저작물이 포함된 미디어는 처리 권한과 공개 동의를 확인하세요.
 - 결과 가장자리는 머리카락, 반투명 물체, 모션 블러, 복잡한 그림자에서
   흔들릴 수 있습니다. 중요한 작업은 프레임을 직접 검수하세요.
+- EXE 시작 직후 AI 모듈을 불러오는 동안 수 초가 걸릴 수 있습니다. 창의
+  `실행 중` 문구가 표시된 뒤 API 문서를 여세요.
 
 ## 개발
 
