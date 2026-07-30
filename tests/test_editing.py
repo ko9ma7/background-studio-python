@@ -2,12 +2,28 @@ from PIL import Image
 
 from background_studio.editing import (
     EditOptions,
+    MaskStroke,
+    apply_mask_strokes,
     compose,
     prepare_foreground,
     to_image_bytes,
     to_svg_outline,
 )
 from background_studio.models import BackgroundMode, CanvasAspect, ForegroundFilter, RenderMode
+
+
+def test_manual_mask_strokes_erase_and_restore_ai_alpha() -> None:
+    cutout = Image.new("RGBA", (12, 6), (30, 60, 90, 180))
+    result = apply_mask_strokes(
+        cutout,
+        [
+            MaskStroke("erase", 0.3, ((0.5, 0.5),)),
+            MaskStroke("restore", 0.08, ((0.5, 0.5),)),
+        ],
+    )
+
+    assert result.getpixel((6, 3))[3] == 180
+    assert result.getpixel((4, 3))[3] == 0
 
 
 def test_color_composite_keeps_foreground_and_replaces_background() -> None:

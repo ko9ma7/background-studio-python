@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 
-from PIL import Image, ImageChops, ImageColor, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
 from .models import BackgroundMode, CanvasAspect, ForegroundFilter, RenderMode
 
@@ -77,6 +77,46 @@ class EditOptions:
             ImageColor.getrgb(self.outline_color)
         except ValueError as exc:
             raise ValueError("outline_color must be a valid CSS color") from exc
+
+
+@dataclass(frozen=True)
+class MaskStroke:
+    tool: str
+    radius: float
+    points: tuple[tuple[float, float], ...]
+
+
+def apply_mask_strokes(cutout: Image.Image, strokes: list[MaskStroke]) -> Image.Image:
+    base = cutout.convert("RGBA")
+    result = base.copy()
+    alpha = result.getchannel("A")
+    base_alpha = base.getchannel("A")
+    minimum = min(base.size)
+    for stroke in strokes:
+        if stroke.tool not in {"erase", "restore"}:
+            raise ValueError("mask stroke tool must be erase or restore")
+        if not stroke.points:
+            continue
+        radius = max(1, round(stroke.radius * minimum))
+        mask = Image.new("L", base.size, 0)
+        draw = ImageDraw.Draw(mask)
+        points = [
+            (
+                round(max(0.0, min(1.0, x)) * base.width),
+                round(max(0.0, min(1.0, y)) * base.height),
+            )
+            for x, y in stroke.points
+        ]
+        if len(points) > 1:
+            draw.line(points, fill=255, width=radius * 2, joint="curve")
+        for x, y in points:
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+        if stroke.tool == "erase":
+            alpha.paste(0, mask=mask)
+        else:
+            alpha.paste(base_alpha, mask=mask)
+    result.putalpha(alpha)
+    return result
 
 
 def open_rgba(data: bytes) -> Image.Image:

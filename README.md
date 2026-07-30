@@ -1,4 +1,4 @@
-# Background Studio · Python 1.3
+# Background Studio · Python 1.4
 
 이미지와 동영상의 배경 제거, 외곽·마스크 추출, 색 보정, 위치·캔버스 편집을
 로컬에서 실행하는 데스크톱 편집기 + FastAPI + CLI 프로젝트입니다.
@@ -19,6 +19,9 @@ Windows 실행 파일은 Python을 설치하지 않아도 C#판과 같은 시각
 - 고급 선택: SAM 3 텍스트 프롬프트 마스크 엔드포인트(별도 설치·라이선스)
 - 운영: Docker, 상태 확인, 업로드 제한, 만료 작업 정리, CI
 - Windows GUI: 파일 대기열, 큰 미리보기, 5개 편집 탭, 자동 저장, 결과·폴더 열기
+- 세로·대형 이미지 맞춤 보기, 포인터 중심 휠 줌, 손 도구 이동, 100% 보기
+- AI 분리 결과용 지우기·복원 브러시와 마스크 실행 취소
+- 신규·오류·편집 변경 항목만 실행하는 중복 변환 방지 대기열
 - FFmpeg: 영상 처리 시 8.1.2 자동 다운로드와 SHA-256 검증
 
 모든 기본 처리는 내 PC/서버에서 실행됩니다. 외부 AI API로 파일을 보내지
@@ -45,7 +48,7 @@ docker compose up --build
 ## Windows EXE
 
 [GitHub Releases](https://github.com/ko9ma7/background-studio-python/releases)에서
-`BackgroundStudio-Python-v1.3.0-win-x64.zip`을 내려받아 압축을 풀고
+`BackgroundStudio-Python-v1.4.0-win-x64.zip`을 내려받아 압축을 풀고
 `BackgroundStudio-Python.exe`를 실행합니다.
 
 - 실행 즉시 파일 대기열·미리보기·배경·필터·위치·고급·저장 탭이 있는

@@ -23,7 +23,15 @@ from uuid import uuid4
 from PIL import Image, ImageDraw, ImageTk
 
 from . import __version__
-from .editing import EditOptions, compose, prepare_foreground, to_image_bytes, to_svg_outline
+from .editing import (
+    EditOptions,
+    MaskStroke,
+    apply_mask_strokes,
+    compose,
+    prepare_foreground,
+    to_image_bytes,
+    to_svg_outline,
+)
 from .engine import SUPPORTED_MODELS, RembgEngine
 from .ffmpeg_manager import ensure as ensure_ffmpeg
 from .ffmpeg_manager import is_available as ffmpeg_available
@@ -72,6 +80,7 @@ class DesktopJob:
     result: Image.Image | None = None
     preview_original: Image.Image | None = None
     preview_cutout: Image.Image | None = None
+    mask_strokes: list[MaskStroke] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -91,6 +100,11 @@ def unique_output_path(folder: Path, source: Path, extension: str) -> Path:
         candidate = folder / f"{stem}-{index}.{extension}"
         index += 1
     return candidate
+
+
+def runnable_desktop_jobs(jobs: list[DesktopJob]) -> list[DesktopJob]:
+    runnable = {"대기", "대기 · 편집 변경", "대기 · 마스크 보정", "오류"}
+    return [job for job in jobs if job.status in runnable]
 
 
 class DesktopApp:
@@ -113,6 +127,15 @@ class DesktopApp:
         self.events: queue.Queue[object] = queue.Queue()
         self.preview_photo: ImageTk.PhotoImage | None = None
         self.preview_after: str | None = None
+        self.preview_zoom = 1.0
+        self.preview_fit_scale = 1.0
+        self.preview_offset = [0.0, 0.0]
+        self.preview_tool = "hand"
+        self.preview_display_size = (1, 1)
+        self.preview_source: Image.Image | None = None
+        self.preview_job_id: str | None = None
+        self.mask_points: list[tuple[float, float]] | None = None
+        self.pan_start: tuple[int, int, float, float] | None = None
 
         self._create_variables()
         self._configure_style()
@@ -151,6 +174,8 @@ class DesktopApp:
         self.video_format = StringVar(value="WebM")
         self.video_fps = DoubleVar(value=2.0)
         self.video_dimension = IntVar(value=720)
+        self.brush_size = IntVar(value=36)
+        self.zoom_text = StringVar(value="맞춤")
         self.status_text = StringVar(value="파일을 추가하면 내 PC에서 처리합니다.")
         self.progress_value = DoubleVar(value=0)
         self.ffmpeg_text = StringVar(
@@ -288,7 +313,7 @@ class DesktopApp:
     def _build_preview(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Card.TFrame", padding=14)
         panel.grid(row=0, column=1, sticky="nsew", padx=(0, 10))
-        panel.grid_rowconfigure(1, weight=1)
+        panel.grid_rowconfigure(2, weight=1)
         panel.grid_columnconfigure(0, weight=1)
         head = ttk.Frame(panel, style="Card.TFrame")
         head.grid(row=0, column=0, sticky="ew", pady=(0, 10))
@@ -297,14 +322,47 @@ class DesktopApp:
         self.preview_name = ttk.Label(head, text="파일을 추가하세요.", style="Muted.TLabel")
         self.preview_name.grid(row=0, column=1, sticky="e")
 
+        tools = ttk.Frame(panel, style="Panel.TFrame", padding=5)
+        tools.grid(row=1, column=0, sticky="ew", pady=(0, 7))
+        ttk.Button(
+            tools, text="−", width=3, command=lambda: self._zoom_by(1 / 1.25)
+        ).pack(side="left")
+        ttk.Label(tools, textvariable=self.zoom_text, width=7, anchor="center").pack(side="left")
+        ttk.Button(tools, text="+", width=3, command=lambda: self._zoom_by(1.25)).pack(side="left")
+        ttk.Button(tools, text="맞춤", command=self._fit_preview).pack(side="left", padx=(5, 2))
+        ttk.Button(tools, text="100%", command=self._actual_size).pack(side="left", padx=2)
+        self.hand_button = ttk.Button(
+            tools, text="손", command=lambda: self._set_preview_tool("hand")
+        )
+        self.hand_button.pack(side="left", padx=(10, 2))
+        self.erase_button = ttk.Button(
+            tools, text="지우기", command=lambda: self._set_preview_tool("erase")
+        )
+        self.erase_button.pack(side="left", padx=2)
+        self.restore_button = ttk.Button(
+            tools, text="복원", command=lambda: self._set_preview_tool("restore")
+        )
+        self.restore_button.pack(side="left", padx=2)
+        ttk.Label(tools, text="크기").pack(side="left", padx=(10, 2))
+        ttk.Scale(tools, from_=4, to=160, variable=self.brush_size, length=90).pack(side="left")
+        self.undo_mask_button = ttk.Button(tools, text="마스크 실행 취소", command=self._undo_mask)
+        self.undo_mask_button.pack(side="left", padx=(6, 0))
+
         self.preview_canvas = Canvas(
             panel,
             bg="#e8ece7",
             highlightthickness=1,
             highlightbackground="#dfe4dc",
         )
-        self.preview_canvas.grid(row=1, column=0, sticky="nsew")
+        self.preview_canvas.grid(row=2, column=0, sticky="nsew")
         self.preview_canvas.bind("<Configure>", lambda _event: self._schedule_preview())
+        self.preview_canvas.bind("<MouseWheel>", self._preview_wheel)
+        self.preview_canvas.bind("<ButtonPress-1>", self._preview_press)
+        self.preview_canvas.bind("<B1-Motion>", self._preview_motion)
+        self.preview_canvas.bind("<ButtonRelease-1>", self._preview_release)
+        self.preview_canvas.bind("<ButtonPress-2>", self._preview_pan_press)
+        self.preview_canvas.bind("<B2-Motion>", self._preview_pan_motion)
+        self.preview_canvas.bind("<ButtonRelease-2>", self._preview_pan_release)
         self.preview_canvas.create_text(
             360,
             280,
@@ -318,7 +376,7 @@ class DesktopApp:
             text="편집값은 분리된 원본 피사체에서 매번 다시 계산됩니다.",
             style="Muted.TLabel",
         )
-        self.preview_info.grid(row=2, column=0, sticky="w", pady=(9, 0))
+        self.preview_info.grid(row=3, column=0, sticky="w", pady=(9, 0))
 
     def _build_editor(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Card.TFrame", padding=14, width=405)
@@ -528,7 +586,16 @@ class DesktopApp:
             self.outline_color,
         )
         for variable in variables:
-            variable.trace_add("write", lambda *_args: self._schedule_preview())
+            variable.trace_add("write", lambda *_args: self._editor_changed())
+
+    def _editor_changed(self) -> None:
+        job = self.selected_job()
+        if job and job.status == "저장됨":
+            job.status = "대기 · 편집 변경"
+            job.result = None
+            job.result_path = None
+            self._refresh_queue()
+        self._schedule_preview()
 
     def _edit_options(self) -> EditOptions:
         return EditOptions(
@@ -655,6 +722,12 @@ class DesktopApp:
             self._select_job(self.selected_job())
 
     def _select_job(self, job: DesktopJob | None) -> None:
+        if (job.id if job else None) != self.preview_job_id:
+            self.preview_job_id = job.id if job else None
+            self.preview_zoom = 1.0
+            self.preview_offset = [0.0, 0.0]
+            self.preview_tool = "hand"
+            self.preview_source = None
         self.preview_name.configure(text=job.name if job else "파일을 추가하세요.")
         self._show_preview(job)
         self._refresh_actions()
@@ -675,7 +748,9 @@ class DesktopApp:
 
     def _refresh_actions(self) -> None:
         busy = bool(self.worker and self.worker.is_alive())
-        self.process_button.configure(state="disabled" if busy or not self.jobs else "normal")
+        self.process_button.configure(
+            state="disabled" if busy or not runnable_desktop_jobs(self.jobs) else "normal"
+        )
         self.cancel_button.configure(state="normal" if busy else "disabled")
         self.remove_button.configure(
             state="disabled" if busy or not self.selected_job() else "normal"
@@ -692,7 +767,40 @@ class DesktopApp:
             self.root.after_cancel(self.preview_after)
         self.preview_after = self.root.after(120, lambda: self._show_preview(self.selected_job()))
 
-    def _show_preview(self, job: DesktopJob | None) -> None:
+    def _preview_strokes(self, job: DesktopJob) -> list[MaskStroke]:
+        strokes = list(job.mask_strokes)
+        if self.mask_points and self.preview_tool in {"erase", "restore"} and job.cutout:
+            strokes.append(
+                MaskStroke(
+                    self.preview_tool,
+                    self.brush_size.get() / 2 / max(1, min(job.cutout.size)),
+                    tuple(self.mask_points),
+                )
+            )
+        return strokes
+
+    def _render_preview_source(self, job: DesktopJob) -> Image.Image | None:
+        if job.is_video:
+            return job.result
+        if job.cutout and self.preview_tool in {"erase", "restore"}:
+            return apply_mask_strokes(job.cutout, self._preview_strokes(job))
+        if job.original and job.cutout:
+            background = None
+            if self.background_path:
+                with Image.open(self.background_path) as opened:
+                    background = opened.convert("RGBA")
+            return compose(
+                job.original,
+                apply_mask_strokes(job.cutout, job.mask_strokes),
+                self._edit_options(),
+                background,
+            )
+        if job.result:
+            return job.result
+        with Image.open(job.path) as opened:
+            return opened.convert("RGBA")
+
+    def _show_preview(self, job: DesktopJob | None, *, rebuild: bool = True) -> None:
         self.preview_after = None
         self.preview_canvas.delete("all")
         width = max(320, self.preview_canvas.winfo_width())
@@ -715,38 +823,49 @@ class DesktopApp:
                 font=("Malgun Gothic", 12, "bold"),
             )
             return
-        image = job.result
-        if job.preview_cutout and job.preview_original:
+        image = self.preview_source
+        if rebuild or image is None:
             try:
-                background = None
-                if self.background_path:
-                    with Image.open(self.background_path) as opened:
-                        background = opened.convert("RGBA")
-                image = compose(
-                    job.preview_original,
-                    job.preview_cutout,
-                    self._edit_options(),
-                    background,
-                )
-            except Exception as exc:
-                self.status_text.set(str(exc))
-        if image is None and not job.is_video:
-            try:
-                with Image.open(job.path) as opened:
-                    image = opened.convert("RGBA")
-            except OSError as exc:
+                image = self._render_preview_source(job)
+                self.preview_source = image
+            except (OSError, ValueError) as exc:
                 self.status_text.set(str(exc))
                 return
         if image is None:
             return
-        display = self._checkerboard(image, (width - 24, height - 24))
+        available_width = max(1, width - 24)
+        available_height = max(1, height - 24)
+        self.preview_fit_scale = min(
+            available_width / image.width,
+            available_height / image.height,
+        )
+        scale = max(0.02, min(32.0, self.preview_fit_scale * self.preview_zoom))
+        display_size = (
+            max(1, round(image.width * scale)),
+            max(1, round(image.height * scale)),
+        )
+        self.preview_display_size = display_size
+        resized = image.resize(display_size, Image.Resampling.LANCZOS)
+        display = self._checkerboard(resized)
         self.preview_photo = ImageTk.PhotoImage(display)
-        self.preview_canvas.create_image(width / 2, height / 2, image=self.preview_photo)
+        self.preview_canvas.create_image(
+            width / 2 + self.preview_offset[0],
+            height / 2 + self.preview_offset[1],
+            image=self.preview_photo,
+        )
+        displayed_percent = round(scale * 100)
+        self.zoom_text.set(
+            "맞춤"
+            if abs(self.preview_zoom - 1.0) < 0.001 and self.preview_offset == [0.0, 0.0]
+            else f"{displayed_percent}%"
+        )
+        self.undo_mask_button.configure(state="normal" if job.mask_strokes else "disabled")
+        cursor = "fleur" if self.preview_tool == "hand" else "crosshair"
+        self.preview_canvas.configure(cursor=cursor)
 
     @staticmethod
-    def _checkerboard(image: Image.Image, bounds: tuple[int, int]) -> Image.Image:
+    def _checkerboard(image: Image.Image) -> Image.Image:
         source = image.convert("RGBA").copy()
-        source.thumbnail((max(1, bounds[0]), max(1, bounds[1])), Image.Resampling.LANCZOS)
         background = Image.new("RGBA", source.size, "#fafbf8")
         draw = ImageDraw.Draw(background)
         tile = 16
@@ -755,6 +874,157 @@ class DesktopApp:
                 if (x // tile + y // tile) % 2 == 0:
                     draw.rectangle((x, y, x + tile, y + tile), fill="#e2e7e1")
         return Image.alpha_composite(background, source)
+
+    def _zoom_by(self, factor: float, point: tuple[float, float] | None = None) -> None:
+        if self.preview_source is None:
+            return
+        old_zoom = self.preview_zoom
+        new_zoom = max(0.05, min(32.0, old_zoom * factor))
+        ratio = new_zoom / old_zoom
+        width = self.preview_canvas.winfo_width()
+        height = self.preview_canvas.winfo_height()
+        px, py = point or (width / 2, height / 2)
+        self.preview_offset[0] = px - width / 2 - (px - width / 2 - self.preview_offset[0]) * ratio
+        self.preview_offset[1] = (
+            py - height / 2 - (py - height / 2 - self.preview_offset[1]) * ratio
+        )
+        self.preview_zoom = new_zoom
+        self._show_preview(self.selected_job(), rebuild=False)
+
+    def _fit_preview(self) -> None:
+        self.preview_zoom = 1.0
+        self.preview_offset = [0.0, 0.0]
+        self._show_preview(self.selected_job(), rebuild=False)
+
+    def _actual_size(self) -> None:
+        if not self.preview_source:
+            return
+        width = max(1, self.preview_canvas.winfo_width() - 24)
+        height = max(1, self.preview_canvas.winfo_height() - 24)
+        fit_scale = min(width / self.preview_source.width, height / self.preview_source.height)
+        self.preview_zoom = 1 / max(fit_scale, 0.0001)
+        self.preview_offset = [0.0, 0.0]
+        self._show_preview(self.selected_job(), rebuild=False)
+
+    def _set_preview_tool(self, tool: str) -> None:
+        job = self.selected_job()
+        if tool != "hand" and (not job or job.is_video or not job.cutout):
+            self.status_text.set(
+                "지우기·복원 브러시는 배경 분리가 끝난 이미지에서 사용할 수 있습니다."
+            )
+            return
+        self.preview_tool = tool
+        self.mask_points = None
+        self.preview_source = None
+        self.preview_info.configure(
+            text=(
+                "브러시로 남은 배경을 지우거나, AI가 지운 피사체를 복원합니다."
+                if tool != "hand"
+                else "휠로 포인터 위치를 확대하고 드래그로 화면을 이동합니다."
+            )
+        )
+        self._show_preview(job)
+
+    def _undo_mask(self) -> None:
+        job = self.selected_job()
+        if not job or not job.mask_strokes:
+            return
+        job.mask_strokes.pop()
+        self._mark_mask_changed(job)
+        self._show_preview(job)
+
+    def _preview_wheel(self, event: object) -> str:
+        delta = getattr(event, "delta", 0)
+        self._zoom_by(1.25 if delta > 0 else 1 / 1.25, (event.x, event.y))
+        return "break"
+
+    def _mask_point(self, event: object, job: DesktopJob) -> tuple[float, float] | None:
+        display_width, display_height = self.preview_display_size
+        left = (
+            self.preview_canvas.winfo_width() / 2
+            + self.preview_offset[0]
+            - display_width / 2
+        )
+        top = (
+            self.preview_canvas.winfo_height() / 2
+            + self.preview_offset[1]
+            - display_height / 2
+        )
+        x = (event.x - left) / max(1, display_width)
+        y = (event.y - top) / max(1, display_height)
+        if not (0 <= x <= 1 and 0 <= y <= 1) or not job.cutout:
+            return None
+        return x, y
+
+    def _preview_press(self, event: object) -> None:
+        if self.preview_tool == "hand":
+            self._preview_pan_press(event)
+            return
+        job = self.selected_job()
+        if not job or not job.cutout:
+            return
+        point = self._mask_point(event, job)
+        if point:
+            self.mask_points = [point]
+
+    def _preview_motion(self, event: object) -> None:
+        if self.preview_tool == "hand":
+            self._preview_pan_motion(event)
+            return
+        job = self.selected_job()
+        if not job or self.mask_points is None:
+            return
+        point = self._mask_point(event, job)
+        if point:
+            self.mask_points.append(point)
+            self._show_preview(job)
+
+    def _preview_release(self, event: object) -> None:
+        if self.preview_tool == "hand":
+            self._preview_pan_release(event)
+            return
+        job = self.selected_job()
+        if not job or not job.cutout or not self.mask_points:
+            self.mask_points = None
+            return
+        point = self._mask_point(event, job)
+        if point:
+            self.mask_points.append(point)
+        job.mask_strokes.append(
+            MaskStroke(
+                self.preview_tool,
+                self.brush_size.get() / 2 / max(1, min(job.cutout.size)),
+                tuple(self.mask_points),
+            )
+        )
+        self.mask_points = None
+        self._mark_mask_changed(job)
+        self._show_preview(job)
+
+    def _mark_mask_changed(self, job: DesktopJob) -> None:
+        job.status = "대기 · 마스크 보정"
+        job.result = None
+        job.result_path = None
+        self.preview_source = None
+        self._refresh_queue()
+
+    def _preview_pan_press(self, event: object) -> None:
+        self.pan_start = (
+            event.x,
+            event.y,
+            self.preview_offset[0],
+            self.preview_offset[1],
+        )
+
+    def _preview_pan_motion(self, event: object) -> None:
+        if not self.pan_start:
+            return
+        x, y, offset_x, offset_y = self.pan_start
+        self.preview_offset = [offset_x + event.x - x, offset_y + event.y - y]
+        self._show_preview(self.selected_job(), rebuild=False)
+
+    def _preview_pan_release(self, _event: object) -> None:
+        self.pan_start = None
 
     def process_queue(self) -> None:
         if self.worker and self.worker.is_alive():
@@ -765,10 +1035,9 @@ class DesktopApp:
         except (ValueError, KeyError) as exc:
             messagebox.showerror("편집값 확인", str(exc))
             return
-        targets = [job for job in self.jobs if job.status not in {"완료", "저장됨"}]
+        targets = runnable_desktop_jobs(self.jobs)
         if not targets:
-            targets = list(self.jobs)
-        if not targets:
+            self.status_text.set("새로 추가되었거나 편집이 바뀐 대기 항목이 없습니다.")
             return
         settings = {
             "edit": edit,
@@ -842,13 +1111,14 @@ class DesktopApp:
         edit = settings["edit"]
         if not isinstance(edit, EditOptions):
             raise TypeError("편집 설정을 읽지 못했습니다.")
-        result = compose(job.original, job.cutout, edit, background)
+        edited_cutout = apply_mask_strokes(job.cutout, job.mask_strokes)
+        result = compose(job.original, edited_cutout, edit, background)
         image_format = str(settings["image_format"])
         output = unique_output_path(Path(settings["output"]), job.path, image_format)
         if image_format == "svg":
             output.write_text(
                 to_svg_outline(
-                    prepare_foreground(job.cutout, edit),
+                    prepare_foreground(edited_cutout, edit),
                     stroke_color=edit.outline_color,
                     stroke_width=edit.outline_width,
                 ),
@@ -858,7 +1128,7 @@ class DesktopApp:
             output.write_bytes(to_image_bytes(result, image_format))
         job.result = result
         job.result_path = output
-        job.preview_original, job.preview_cutout = self._preview_pair(job.original, job.cutout)
+        job.preview_original, job.preview_cutout = self._preview_pair(job.original, edited_cutout)
         self._post(
             lambda selected=job: (
                 self._select_job(selected) if selected.id == self.selected_id else None
